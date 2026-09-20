@@ -1,0 +1,14 @@
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# Compiled output
+out/
+*.class
+
+# Maven (на будущее)
+target/
+
+# OS
+.DS_Store
+Thumbs.db
