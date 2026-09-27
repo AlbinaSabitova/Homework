@@ -3,6 +3,7 @@ package com.example.userservice.console;
 import com.example.userservice.dao.UserDao;
 import com.example.userservice.entity.User;
 import com.example.userservice.exception.DaoException;
+import com.example.userservice.util.UserValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,19 +57,21 @@ public class ConsoleUI {
     private void createUser() {
         try {
             System.out.print("Имя: ");
-            String name = scanner.nextLine().trim();
+            String name = UserValidator.validateName(scanner.nextLine());
+
             System.out.print("Email: ");
-            String email = scanner.nextLine().trim();
+            String email = UserValidator.validateEmail(scanner.nextLine());
+
             System.out.print("Возраст: ");
-            Integer age = parseAge(scanner.nextLine());
+            Integer age = UserValidator.validateAge(parseAge(scanner.nextLine()));
 
             User user = new User(name, email, age);
             User saved = userDao.save(user);
             System.out.println("Создан: " + saved);
         } catch (DaoException e) {
-            System.out.println("Ошибка: " + e.getMessage());
+            System.out.println("Ошибка БД: " + e.getMessage());
         } catch (IllegalArgumentException e) {
-            System.out.println("Некорректный ввод: " + e.getMessage());
+            System.out.println("Ошибка ввода: " + e.getMessage());
         }
     }
 
@@ -110,22 +113,30 @@ public class ConsoleUI {
             }
             User user = found.get();
 
-            System.out.print("Новое имя (" + user.getName() + "): ");
-            String name = scanner.nextLine().trim();
-            if (!name.isEmpty()) user.setName(name);
+            System.out.print("Новое имя (" + user.getName() + ", Enter — оставить): ");
+            String nameInput = scanner.nextLine();
+            if (!nameInput.isBlank()) {
+                user.setName(UserValidator.validateName(nameInput));
+            }
 
-            System.out.print("Новый email (" + user.getEmail() + "): ");
-            String email = scanner.nextLine().trim();
-            if (!email.isEmpty()) user.setEmail(email);
+            System.out.print("Новый email (" + user.getEmail() + ", Enter — оставить): ");
+            String emailInput = scanner.nextLine();
+            if (!emailInput.isBlank()) {
+                user.setEmail(UserValidator.validateEmail(emailInput));
+            }
 
-            System.out.print("Новый возраст (" + user.getAge() + "): ");
-            String ageLine = scanner.nextLine().trim();
-            if (!ageLine.isEmpty()) user.setAge(parseAge(ageLine));
+            System.out.print("Новый возраст (" + user.getAge() + ", Enter — оставить): ");
+            String ageInput = scanner.nextLine();
+            if (!ageInput.isBlank()) {
+                user.setAge(UserValidator.validateAge(parseAge(ageInput)));
+            }
 
             User updated = userDao.update(user);
             System.out.println("Обновлён: " + updated);
-        } catch (DaoException | IllegalArgumentException e) {
-            System.out.println("Ошибка: " + e.getMessage());
+        } catch (DaoException e) {
+            System.out.println("Ошибка БД: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            System.out.println("Ошибка ввода: " + e.getMessage());
         }
     }
 
@@ -149,15 +160,14 @@ public class ConsoleUI {
     }
 
     private Integer parseAge(String value) {
-        if (value == null || value.isBlank()) return null;
+        if (value == null || value.isBlank()) {
+            // возвращаем null — валидатор сам пожалуется «Возраст обязателен»
+            return null;
+        }
         try {
-            int age = Integer.parseInt(value.trim());
-            if (age < 0 || age > 150) {
-                throw new IllegalArgumentException("возраст должен быть в диапазоне 0..150");
-            }
-            return age;
+            return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("возраст должен быть числом");
+            throw new IllegalArgumentException("Возраст должен быть числом");
         }
     }
 }
