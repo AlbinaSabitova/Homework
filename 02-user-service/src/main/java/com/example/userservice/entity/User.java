@@ -19,7 +19,7 @@ public class User {
     @Column(name = "email", nullable = false, unique = true, length = 50)
     private String email;
 
-    @Column(name = "age")
+    @Column(name = "age", nullable = false)
     private Integer age;
 
     @Column(name = "created_at", nullable = false, updatable = false)

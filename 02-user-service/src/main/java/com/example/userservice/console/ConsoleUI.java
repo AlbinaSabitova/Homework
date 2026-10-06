@@ -1,11 +1,8 @@
 package com.example.userservice.console;
 
-import com.example.userservice.dao.UserDao;
 import com.example.userservice.entity.User;
-import com.example.userservice.exception.DaoException;
-import com.example.userservice.util.UserValidator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.example.userservice.exception.ServiceException;
+import com.example.userservice.service.UserService;
 
 import java.util.List;
 import java.util.Optional;
@@ -13,13 +10,11 @@ import java.util.Scanner;
 
 public class ConsoleUI {
 
-    private static final Logger log = LoggerFactory.getLogger(ConsoleUI.class);
-
-    private final UserDao userDao;
+    private final UserService userService;
     private final Scanner scanner = new Scanner(System.in);
 
-    public ConsoleUI(UserDao userDao) {
-        this.userDao = userDao;
+    public ConsoleUI(UserService userService) {
+        this.userService = userService;
     }
 
     public void start() {
@@ -57,19 +52,18 @@ public class ConsoleUI {
     private void createUser() {
         try {
             System.out.print("Имя: ");
-            String name = UserValidator.validateName(scanner.nextLine());
+            String name = scanner.nextLine();
 
             System.out.print("Email: ");
-            String email = UserValidator.validateEmail(scanner.nextLine());
+            String email = scanner.nextLine();
 
             System.out.print("Возраст: ");
-            Integer age = UserValidator.validateAge(parseAge(scanner.nextLine()));
+            Integer age = parseAge(scanner.nextLine());
 
-            User user = new User(name, email, age);
-            User saved = userDao.save(user);
+            User saved = userService.create(name, email, age);
             System.out.println("Создан: " + saved);
-        } catch (DaoException e) {
-            System.out.println("Ошибка БД: " + e.getMessage());
+        } catch (ServiceException e) {
+            System.out.println("Ошибка: " + e.getMessage());
         } catch (IllegalArgumentException e) {
             System.out.println("Ошибка ввода: " + e.getMessage());
         }
@@ -79,25 +73,27 @@ public class ConsoleUI {
         try {
             System.out.print("ID: ");
             Long id = parseId(scanner.nextLine());
-            Optional<User> user = userDao.findById(id);
+            Optional<User> user = userService.findById(id);
             user.ifPresentOrElse(
                     u -> System.out.println("Найден: " + u),
                     () -> System.out.println("Пользователь с id=" + id + " не найден")
             );
-        } catch (DaoException | IllegalArgumentException e) {
+        } catch (ServiceException e) {
             System.out.println("Ошибка: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            System.out.println("Ошибка ввода: " + e.getMessage());
         }
     }
 
     private void listAllUsers() {
         try {
-            List<User> users = userDao.findAll();
+            List<User> users = userService.findAll();
             if (users.isEmpty()) {
                 System.out.println("Список пуст.");
             } else {
                 users.forEach(System.out::println);
             }
-        } catch (DaoException e) {
+        } catch (ServiceException e) {
             System.out.println("Ошибка: " + e.getMessage());
         }
     }
@@ -106,7 +102,8 @@ public class ConsoleUI {
         try {
             System.out.print("ID пользователя для обновления: ");
             Long id = parseId(scanner.nextLine());
-            Optional<User> found = userDao.findById(id);
+
+            Optional<User> found = userService.findById(id);
             if (found.isEmpty()) {
                 System.out.println("Пользователь с id=" + id + " не найден");
                 return;
@@ -115,26 +112,20 @@ public class ConsoleUI {
 
             System.out.print("Новое имя (" + user.getName() + ", Enter — оставить): ");
             String nameInput = scanner.nextLine();
-            if (!nameInput.isBlank()) {
-                user.setName(UserValidator.validateName(nameInput));
-            }
+            String name = nameInput.isBlank() ? null : nameInput;
 
             System.out.print("Новый email (" + user.getEmail() + ", Enter — оставить): ");
             String emailInput = scanner.nextLine();
-            if (!emailInput.isBlank()) {
-                user.setEmail(UserValidator.validateEmail(emailInput));
-            }
+            String email = emailInput.isBlank() ? null : emailInput;
 
             System.out.print("Новый возраст (" + user.getAge() + ", Enter — оставить): ");
             String ageInput = scanner.nextLine();
-            if (!ageInput.isBlank()) {
-                user.setAge(UserValidator.validateAge(parseAge(ageInput)));
-            }
+            Integer age = ageInput.isBlank() ? null : parseAge(ageInput);
 
-            User updated = userDao.update(user);
+            User updated = userService.update(id, name, email, age);
             System.out.println("Обновлён: " + updated);
-        } catch (DaoException e) {
-            System.out.println("Ошибка БД: " + e.getMessage());
+        } catch (ServiceException e) {
+            System.out.println("Ошибка: " + e.getMessage());
         } catch (IllegalArgumentException e) {
             System.out.println("Ошибка ввода: " + e.getMessage());
         }
@@ -144,10 +135,12 @@ public class ConsoleUI {
         try {
             System.out.print("ID пользователя для удаления: ");
             Long id = parseId(scanner.nextLine());
-            boolean deleted = userDao.deleteById(id);
+            boolean deleted = userService.deleteById(id);
             System.out.println(deleted ? "Пользователь удалён" : "Пользователь не найден");
-        } catch (DaoException | IllegalArgumentException e) {
+        } catch (ServiceException e) {
             System.out.println("Ошибка: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            System.out.println("Ошибка ввода: " + e.getMessage());
         }
     }
 
@@ -161,7 +154,6 @@ public class ConsoleUI {
 
     private Integer parseAge(String value) {
         if (value == null || value.isBlank()) {
-            // возвращаем null — валидатор сам пожалуется «Возраст обязателен»
             return null;
         }
         try {
