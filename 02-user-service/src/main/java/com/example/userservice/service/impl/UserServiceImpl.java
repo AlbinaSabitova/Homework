@@ -1,86 +1,73 @@
 package com.example.userservice.service.impl;
 
-import com.example.userservice.dao.UserDao;
+import com.example.userservice.dto.UserCreateRequest;
+import com.example.userservice.dto.UserResponse;
+import com.example.userservice.dto.UserUpdateRequest;
 import com.example.userservice.entity.User;
-import com.example.userservice.exception.DaoException;
-import com.example.userservice.exception.ServiceException;
+import com.example.userservice.exception.UserNotFoundException;
+import com.example.userservice.mapper.UserMapper;
+import com.example.userservice.repository.UserRepository;
 import com.example.userservice.service.UserService;
-import com.example.userservice.util.UserValidator;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Optional;
 
+@Service
 public class UserServiceImpl implements UserService {
 
-    private final UserDao userDao;
+    private final UserRepository userRepository;
+    private final UserMapper userMapper;
 
-    public UserServiceImpl(UserDao userDao) {
-        this.userDao = userDao;
+    public UserServiceImpl(UserRepository userRepository, UserMapper userMapper) {
+        this.userRepository = userRepository;
+        this.userMapper = userMapper;
     }
 
     @Override
-    public User create(String name, String email, Integer age) {
-        String validName = UserValidator.validateName(name);
-        String validEmail = UserValidator.validateEmail(email);
-        Integer validAge = UserValidator.validateAge(age);
-
-        try {
-            User user = new User(validName, validEmail, validAge);
-            return userDao.save(user);
-        } catch (DaoException e) {
-            throw new ServiceException("Не удалось создать пользователя: " + e.getMessage(), e);
-        }
+    @Transactional
+    public UserResponse create(UserCreateRequest request) {
+        User user = new User(request.name(), request.email(), request.age());
+        User saved = userRepository.save(user);
+        return userMapper.toResponse(saved);
     }
 
     @Override
-    public Optional<User> findById(Long id) {
-        if (id == null || id <= 0) {
-            throw new ServiceException("id должен быть положительным числом");
-        }
-        try {
-            return userDao.findById(id);
-        } catch (DaoException e) {
-            throw new ServiceException("Не удалось найти пользователя: " + e.getMessage(), e);
-        }
+    @Transactional(readOnly = true)
+    public UserResponse findById(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException(id));
+        return userMapper.toResponse(user);
     }
 
     @Override
-    public List<User> findAll() {
-        try {
-            return userDao.findAll();
-        } catch (DaoException e) {
-            throw new ServiceException("Не удалось получить список пользователей: " + e.getMessage(), e);
-        }
+    @Transactional(readOnly = true)
+    public List<UserResponse> findAll() {
+        return userRepository.findAll().stream()
+                .map(userMapper::toResponse)
+                .toList();
     }
 
     @Override
-    public User update(Long id, String name, String email, Integer age) {
-        if (id == null || id <= 0) {
-            throw new ServiceException("id должен быть положительным числом");
-        }
-        try {
-            User existing = userDao.findById(id)
-                    .orElseThrow(() -> new ServiceException("Пользователь с id=" + id + " не найден"));
+    @Transactional
+    public UserResponse update(Long id, UserUpdateRequest request) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException(id));
 
-            if (name != null) existing.setName(UserValidator.validateName(name));
-            if (email != null) existing.setEmail(UserValidator.validateEmail(email));
-            if (age != null) existing.setAge(UserValidator.validateAge(age));
+        if (request.name() != null) user.setName(request.name());
+        if (request.email() != null) user.setEmail(request.email());
+        if (request.age() != null) user.setAge(request.age());
 
-            return userDao.update(existing);
-        } catch (DaoException e) {
-            throw new ServiceException("Не удалось обновить пользователя: " + e.getMessage(), e);
-        }
+        User updated = userRepository.save(user);
+        return userMapper.toResponse(updated);
     }
 
     @Override
-    public boolean deleteById(Long id) {
-        if (id == null || id <= 0) {
-            throw new ServiceException("id должен быть положительным числом");
+    @Transactional
+    public void deleteById(Long id) {
+        if (!userRepository.existsById(id)) {
+            throw new UserNotFoundException(id);
         }
-        try {
-            return userDao.deleteById(id);
-        } catch (DaoException e) {
-            throw new ServiceException("Не удалось удалить пользователя: " + e.getMessage(), e);
-        }
+        userRepository.deleteById(id);
     }
 }

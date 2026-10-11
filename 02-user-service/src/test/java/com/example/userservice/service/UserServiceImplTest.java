@@ -1,26 +1,29 @@
 package com.example.userservice.service;
 
-import com.example.userservice.dao.UserDao;
+import com.example.userservice.dto.UserCreateRequest;
+import com.example.userservice.dto.UserResponse;
+import com.example.userservice.dto.UserUpdateRequest;
 import com.example.userservice.entity.User;
-import com.example.userservice.exception.DaoException;
-import com.example.userservice.exception.ServiceException;
+import com.example.userservice.exception.UserNotFoundException;
+import com.example.userservice.mapper.UserMapper;
+import com.example.userservice.repository.UserRepository;
 import com.example.userservice.service.impl.UserServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -28,17 +31,26 @@ import static org.mockito.Mockito.*;
 class UserServiceImplTest {
 
     @Mock
-    private UserDao userDao;
+    private UserRepository userRepository;
+
+    @Mock
+    private UserMapper userMapper;
 
     @InjectMocks
     private UserServiceImpl userService;
 
     private User sampleUser;
+    private UserResponse sampleResponse;
 
     @BeforeEach
     void setUp() {
         sampleUser = new User("Alice", "alice@mail.ru", 30);
         sampleUser.setId(1L);
+        sampleUser.setCreatedAt(LocalDateTime.now());
+
+        sampleResponse = new UserResponse(
+                1L, "Alice", "alice@mail.ru", 30, sampleUser.getCreatedAt()
+        );
     }
 
     // ---------------- create ----------------
@@ -48,63 +60,37 @@ class UserServiceImplTest {
     class Create {
 
         @Test
-        @DisplayName("валидные данные -> userDao.save вызван с корректным User")
-        void valid_savesViaDao() {
-            when(userDao.save(any(User.class))).thenReturn(sampleUser);
+        @DisplayName("валидные данные -> сохраняет и возвращает DTO")
+        void valid_savesAndReturnsDto() {
+            UserCreateRequest request = new UserCreateRequest("Alice", "alice@mail.ru", 30);
 
-            User result = userService.create("Alice", "alice@mail.ru", 30);
+            when(userRepository.save(any(User.class))).thenReturn(sampleUser);
+            when(userMapper.toResponse(sampleUser)).thenReturn(sampleResponse);
 
-            assertThat(result).isSameAs(sampleUser);
+            UserResponse result = userService.create(request);
+
+            assertThat(result).isEqualTo(sampleResponse);
 
             ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-            verify(userDao).save(captor.capture());
+            verify(userRepository).save(captor.capture());
             User passed = captor.getValue();
             assertThat(passed.getName()).isEqualTo("Alice");
             assertThat(passed.getEmail()).isEqualTo("alice@mail.ru");
             assertThat(passed.getAge()).isEqualTo(30);
 
-            verifyNoMoreInteractions(userDao);
-        }
-
-        @ParameterizedTest
-        @ValueSource(strings = {"", "   ", "\t"})
-        @DisplayName("пустое имя -> IllegalArgumentException, DAO не вызывается")
-        void blankName_throws(String name) {
-            assertThatThrownBy(() -> userService.create(name, "a@mail.ru", 30))
-                    .isInstanceOf(IllegalArgumentException.class);
-
-            verifyNoInteractions(userDao);
-        }
-
-        @ParameterizedTest
-        @ValueSource(strings = {"abc", "a@", "@mail.ru", "a@mail"})
-        @DisplayName("некорректный email -> IllegalArgumentException")
-        void invalidEmail_throws(String email) {
-            assertThatThrownBy(() -> userService.create("Alice", email, 30))
-                    .isInstanceOf(IllegalArgumentException.class);
-
-            verifyNoInteractions(userDao);
+            verify(userMapper).toResponse(sampleUser);
         }
 
         @Test
-        @DisplayName("возраст null -> IllegalArgumentException")
-        void nullAge_throws() {
-            assertThatThrownBy(() -> userService.create("Alice", "a@mail.ru", null))
-                    .isInstanceOf(IllegalArgumentException.class);
+        @DisplayName("ошибка репозитория -> пробрасывается наверх")
+        void repositoryFails_propagates() {
+            UserCreateRequest request = new UserCreateRequest("Alice", "alice@mail.ru", 30);
+            when(userRepository.save(any(User.class)))
+                    .thenThrow(new RuntimeException("DB error"));
 
-            verifyNoInteractions(userDao);
-        }
-
-        @Test
-        @DisplayName("DAO бросает DaoException -> ServiceException")
-        void daoFailure_wrappedIntoServiceException() {
-            when(userDao.save(any(User.class)))
-                    .thenThrow(new DaoException("DB is down"));
-
-            assertThatThrownBy(() -> userService.create("Alice", "a@mail.ru", 30))
-                    .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("Не удалось создать пользователя")
-                    .hasCauseInstanceOf(DaoException.class);
+            assertThatThrownBy(() -> userService.create(request))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("DB error");
         }
     }
 
@@ -115,49 +101,28 @@ class UserServiceImplTest {
     class FindById {
 
         @Test
-        @DisplayName("существующий id -> Optional с пользователем")
-        void existing_returnsUser() {
-            when(userDao.findById(1L)).thenReturn(Optional.of(sampleUser));
+        @DisplayName("существующий id -> возвращает DTO")
+        void existing_returnsDto() {
+            when(userRepository.findById(1L)).thenReturn(Optional.of(sampleUser));
+            when(userMapper.toResponse(sampleUser)).thenReturn(sampleResponse);
 
-            assertThat(userService.findById(1L)).contains(sampleUser);
-            verify(userDao).findById(1L);
+            UserResponse result = userService.findById(1L);
+
+            assertThat(result).isEqualTo(sampleResponse);
+            verify(userRepository).findById(1L);
+            verify(userMapper).toResponse(sampleUser);
         }
 
         @Test
-        @DisplayName("несуществующий id -> пустой Optional")
-        void missing_returnsEmpty() {
-            when(userDao.findById(99L)).thenReturn(Optional.empty());
+        @DisplayName("несуществующий id -> UserNotFoundException")
+        void missing_throws() {
+            when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
-            assertThat(userService.findById(99L)).isEmpty();
-        }
+            assertThatThrownBy(() -> userService.findById(99L))
+                    .isInstanceOf(UserNotFoundException.class)
+                    .hasMessageContaining("99");
 
-        @ParameterizedTest
-        @ValueSource(longs = {0L, -1L, -100L})
-        @DisplayName("невалидный id -> ServiceException, DAO не вызывается")
-        void invalidId_throws(long id) {
-            assertThatThrownBy(() -> userService.findById(id))
-                    .isInstanceOf(ServiceException.class);
-
-            verifyNoInteractions(userDao);
-        }
-
-        @Test
-        @DisplayName("id null -> ServiceException")
-        void nullId_throws() {
-            assertThatThrownBy(() -> userService.findById(null))
-                    .isInstanceOf(ServiceException.class);
-
-            verifyNoInteractions(userDao);
-        }
-
-        @Test
-        @DisplayName("DAO бросает DaoException -> ServiceException")
-        void daoFailure_wrapped() {
-            when(userDao.findById(1L)).thenThrow(new DaoException("boom"));
-
-            assertThatThrownBy(() -> userService.findById(1L))
-                    .isInstanceOf(ServiceException.class)
-                    .hasCauseInstanceOf(DaoException.class);
+            verify(userMapper, never()).toResponse(any());
         }
     }
 
@@ -168,29 +133,23 @@ class UserServiceImplTest {
     class FindAll {
 
         @Test
-        @DisplayName("возвращает список из DAO")
-        void returnsList() {
-            when(userDao.findAll()).thenReturn(List.of(sampleUser));
+        @DisplayName("возвращает список DTO")
+        void returnsListOfDtos() {
+            when(userRepository.findAll()).thenReturn(List.of(sampleUser));
+            when(userMapper.toResponse(sampleUser)).thenReturn(sampleResponse);
 
-            assertThat(userService.findAll()).containsExactly(sampleUser);
+            List<UserResponse> result = userService.findAll();
+
+            assertThat(result).containsExactly(sampleResponse);
         }
 
         @Test
         @DisplayName("пустая БД -> пустой список")
         void empty_returnsEmptyList() {
-            when(userDao.findAll()).thenReturn(List.of());
+            when(userRepository.findAll()).thenReturn(List.of());
 
             assertThat(userService.findAll()).isEmpty();
-        }
-
-        @Test
-        @DisplayName("DAO бросает DaoException -> ServiceException")
-        void daoFailure_wrapped() {
-            when(userDao.findAll()).thenThrow(new DaoException("boom"));
-
-            assertThatThrownBy(() -> userService.findAll())
-                    .isInstanceOf(ServiceException.class)
-                    .hasCauseInstanceOf(DaoException.class);
+            verify(userMapper, never()).toResponse(any());
         }
     }
 
@@ -201,64 +160,71 @@ class UserServiceImplTest {
     class Update {
 
         @Test
-        @DisplayName("валидные данные -> DAO.update с обновлённым User")
-        void valid_updatesUser() {
-            when(userDao.findById(1L)).thenReturn(Optional.of(sampleUser));
-            when(userDao.update(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        @DisplayName("валидные данные -> обновляет и возвращает DTO")
+        void valid_updatesAndReturnsDto() {
+            UserUpdateRequest request = new UserUpdateRequest("Bob", "bob@mail.ru", 25);
 
-            User result = userService.update(1L, "Bob", "bob@mail.ru", 25);
+            when(userRepository.findById(1L)).thenReturn(Optional.of(sampleUser));
+            when(userRepository.save(sampleUser)).thenReturn(sampleUser);
+            when(userMapper.toResponse(sampleUser)).thenReturn(
+                    new UserResponse(1L, "Bob", "bob@mail.ru", 25, sampleUser.getCreatedAt())
+            );
 
-            assertThat(result.getName()).isEqualTo("Bob");
-            assertThat(result.getEmail()).isEqualTo("bob@mail.ru");
-            assertThat(result.getAge()).isEqualTo(25);
+            UserResponse result = userService.update(1L, request);
 
-            verify(userDao).update(sampleUser);
+            assertThat(result.name()).isEqualTo("Bob");
+            assertThat(result.email()).isEqualTo("bob@mail.ru");
+            assertThat(result.age()).isEqualTo(25);
+            assertThat(sampleUser.getName()).isEqualTo("Bob");
+            assertThat(sampleUser.getEmail()).isEqualTo("bob@mail.ru");
+            assertThat(sampleUser.getAge()).isEqualTo(25);
+
+            verify(userRepository).save(sampleUser);
         }
 
         @Test
-        @DisplayName("null-поля не меняют прежние значения")
+        @DisplayName("null-поля -> оставляют прежние значения")
         void nullFields_keepOldValues() {
-            when(userDao.findById(1L)).thenReturn(Optional.of(sampleUser));
-            when(userDao.update(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+            UserUpdateRequest request = new UserUpdateRequest(null, null, null);
 
-            User result = userService.update(1L, null, null, null);
+            when(userRepository.findById(1L)).thenReturn(Optional.of(sampleUser));
+            when(userRepository.save(sampleUser)).thenReturn(sampleUser);
+            when(userMapper.toResponse(sampleUser)).thenReturn(sampleResponse);
 
-            assertThat(result.getName()).isEqualTo("Alice");
-            assertThat(result.getEmail()).isEqualTo("alice@mail.ru");
-            assertThat(result.getAge()).isEqualTo(30);
+            userService.update(1L, request);
+
+            assertThat(sampleUser.getName()).isEqualTo("Alice");
+            assertThat(sampleUser.getEmail()).isEqualTo("alice@mail.ru");
+            assertThat(sampleUser.getAge()).isEqualTo(30);
         }
 
         @Test
-        @DisplayName("несуществующий id -> ServiceException, update не вызывается")
-        void missingUser_throws() {
-            when(userDao.findById(42L)).thenReturn(Optional.empty());
+        @DisplayName("частичное обновление — меняет только переданное поле")
+        void partialUpdate_changesOnlyProvidedField() {
+            UserUpdateRequest request = new UserUpdateRequest(null, "new@mail.ru", null);
 
-            assertThatThrownBy(() -> userService.update(42L, "X", "x@mail.ru", 20))
-                    .isInstanceOf(ServiceException.class)
-                    .hasMessageContaining("не найден");
+            when(userRepository.findById(1L)).thenReturn(Optional.of(sampleUser));
+            when(userRepository.save(sampleUser)).thenReturn(sampleUser);
+            when(userMapper.toResponse(sampleUser)).thenReturn(sampleResponse);
 
-            verify(userDao, never()).update(any());
+            userService.update(1L, request);
+
+            assertThat(sampleUser.getName()).isEqualTo("Alice");      // не менялось
+            assertThat(sampleUser.getEmail()).isEqualTo("new@mail.ru"); // изменилось
+            assertThat(sampleUser.getAge()).isEqualTo(30);              // не менялось
         }
 
         @Test
-        @DisplayName("некорректный email -> IllegalArgumentException, update не вызывается")
-        void invalidEmail_throws() {
-            when(userDao.findById(1L)).thenReturn(Optional.of(sampleUser));
+        @DisplayName("несуществующий id -> UserNotFoundException, save не вызывается")
+        void missing_throws() {
+            UserUpdateRequest request = new UserUpdateRequest("Bob", null, null);
 
-            assertThatThrownBy(() -> userService.update(1L, null, "bad", null))
-                    .isInstanceOf(IllegalArgumentException.class);
+            when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
-            verify(userDao, never()).update(any());
-        }
+            assertThatThrownBy(() -> userService.update(99L, request))
+                    .isInstanceOf(UserNotFoundException.class);
 
-        @Test
-        @DisplayName("DAO бросает DaoException при findById -> ServiceException")
-        void daoFindFailure_wrapped() {
-            when(userDao.findById(1L)).thenThrow(new DaoException("boom"));
-
-            assertThatThrownBy(() -> userService.update(1L, "X", "x@mail.ru", 20))
-                    .isInstanceOf(ServiceException.class)
-                    .hasCauseInstanceOf(DaoException.class);
+            verify(userRepository, never()).save(any());
         }
     }
 
@@ -269,40 +235,25 @@ class UserServiceImplTest {
     class DeleteById {
 
         @Test
-        @DisplayName("существующий -> true")
-        void existing_returnsTrue() {
-            when(userDao.deleteById(1L)).thenReturn(true);
+        @DisplayName("существующий -> удаляет")
+        void existing_deletes() {
+            when(userRepository.existsById(1L)).thenReturn(true);
 
-            assertThat(userService.deleteById(1L)).isTrue();
-            verify(userDao).deleteById(1L);
+            userService.deleteById(1L);
+
+            verify(userRepository).existsById(1L);
+            verify(userRepository).deleteById(1L);
         }
 
         @Test
-        @DisplayName("несуществующий -> false")
-        void missing_returnsFalse() {
-            when(userDao.deleteById(99L)).thenReturn(false);
+        @DisplayName("несуществующий -> UserNotFoundException, deleteById не вызывается")
+        void missing_throws() {
+            when(userRepository.existsById(99L)).thenReturn(false);
 
-            assertThat(userService.deleteById(99L)).isFalse();
-        }
+            assertThatThrownBy(() -> userService.deleteById(99L))
+                    .isInstanceOf(UserNotFoundException.class);
 
-        @ParameterizedTest
-        @ValueSource(longs = {0L, -1L})
-        @DisplayName("невалидный id -> ServiceException")
-        void invalidId_throws(long id) {
-            assertThatThrownBy(() -> userService.deleteById(id))
-                    .isInstanceOf(ServiceException.class);
-
-            verifyNoInteractions(userDao);
-        }
-
-        @Test
-        @DisplayName("DAO бросает DaoException -> ServiceException")
-        void daoFailure_wrapped() {
-            when(userDao.deleteById(1L)).thenThrow(new DaoException("boom"));
-
-            assertThatThrownBy(() -> userService.deleteById(1L))
-                    .isInstanceOf(ServiceException.class)
-                    .hasCauseInstanceOf(DaoException.class);
+            verify(userRepository, never()).deleteById(any());
         }
     }
 }
