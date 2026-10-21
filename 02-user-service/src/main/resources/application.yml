@@ -4,8 +4,8 @@ spring:
 
   datasource:
     url: jdbc:postgresql://localhost:5432/userdb
-    username: postgres
-    password: postgres
+    username: user
+    password: password
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -18,6 +18,12 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
     open-in-view: false
 
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
 server:
   port: 8080
 
@@ -25,3 +31,7 @@ logging:
   level:
     org.hibernate.SQL: DEBUG
     com.example.userservice: DEBUG
+
+app:
+  kafka:
+    topic: user-events

@@ -4,6 +4,9 @@ import com.example.userservice.dto.UserCreateRequest;
 import com.example.userservice.dto.UserResponse;
 import com.example.userservice.dto.UserUpdateRequest;
 import com.example.userservice.entity.User;
+import com.example.userservice.event.UserEvent;
+import com.example.userservice.event.UserEventProducer;
+import com.example.userservice.event.UserOperation;
 import com.example.userservice.exception.UserNotFoundException;
 import com.example.userservice.mapper.UserMapper;
 import com.example.userservice.repository.UserRepository;
@@ -14,6 +17,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -35,6 +39,9 @@ class UserServiceImplTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private UserEventProducer eventProducer;
 
     @InjectMocks
     private UserServiceImpl userService;
@@ -60,8 +67,8 @@ class UserServiceImplTest {
     class Create {
 
         @Test
-        @DisplayName("валидные данные -> сохраняет и возвращает DTO")
-        void valid_savesAndReturnsDto() {
+        @DisplayName("валидные данные -> сохраняет, возвращает DTO и отправляет CREATED-событие")
+        void valid_savesReturnsDtoAndSendsEvent() {
             UserCreateRequest request = new UserCreateRequest("Alice", "alice@mail.ru", 30);
 
             when(userRepository.save(any(User.class))).thenReturn(sampleUser);
@@ -71,19 +78,40 @@ class UserServiceImplTest {
 
             assertThat(result).isEqualTo(sampleResponse);
 
-            ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-            verify(userRepository).save(captor.capture());
-            User passed = captor.getValue();
+            ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+            verify(userRepository).save(userCaptor.capture());
+            User passed = userCaptor.getValue();
             assertThat(passed.getName()).isEqualTo("Alice");
             assertThat(passed.getEmail()).isEqualTo("alice@mail.ru");
             assertThat(passed.getAge()).isEqualTo(30);
 
             verify(userMapper).toResponse(sampleUser);
+
+            ArgumentCaptor<UserEvent> eventCaptor = ArgumentCaptor.forClass(UserEvent.class);
+            verify(eventProducer).send(eventCaptor.capture());
+            UserEvent sentEvent = eventCaptor.getValue();
+            assertThat(sentEvent.operation()).isEqualTo(UserOperation.CREATED);
+            assertThat(sentEvent.email()).isEqualTo("alice@mail.ru");
         }
 
         @Test
-        @DisplayName("ошибка репозитория -> пробрасывается наверх")
-        void repositoryFails_propagates() {
+        @DisplayName("save вызывается раньше, чем send события")
+        void valid_saveBeforeSendEvent() {
+            UserCreateRequest request = new UserCreateRequest("Alice", "alice@mail.ru", 30);
+
+            when(userRepository.save(any(User.class))).thenReturn(sampleUser);
+            when(userMapper.toResponse(sampleUser)).thenReturn(sampleResponse);
+
+            userService.create(request);
+
+            InOrder inOrder = inOrder(userRepository, eventProducer);
+            inOrder.verify(userRepository).save(any(User.class));
+            inOrder.verify(eventProducer).send(any(UserEvent.class));
+        }
+
+        @Test
+        @DisplayName("ошибка репозитория -> пробрасывается наверх, событие НЕ отправляется")
+        void repositoryFails_propagatesAndDoesNotSendEvent() {
             UserCreateRequest request = new UserCreateRequest("Alice", "alice@mail.ru", 30);
             when(userRepository.save(any(User.class)))
                     .thenThrow(new RuntimeException("DB error"));
@@ -91,6 +119,8 @@ class UserServiceImplTest {
             assertThatThrownBy(() -> userService.create(request))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("DB error");
+
+            verify(eventProducer, never()).send(any());
         }
     }
 
@@ -101,7 +131,7 @@ class UserServiceImplTest {
     class FindById {
 
         @Test
-        @DisplayName("существующий id -> возвращает DTO")
+        @DisplayName("существующий id -> возвращает DTO, событий нет")
         void existing_returnsDto() {
             when(userRepository.findById(1L)).thenReturn(Optional.of(sampleUser));
             when(userMapper.toResponse(sampleUser)).thenReturn(sampleResponse);
@@ -111,6 +141,7 @@ class UserServiceImplTest {
             assertThat(result).isEqualTo(sampleResponse);
             verify(userRepository).findById(1L);
             verify(userMapper).toResponse(sampleUser);
+            verifyNoInteractions(eventProducer);
         }
 
         @Test
@@ -123,6 +154,7 @@ class UserServiceImplTest {
                     .hasMessageContaining("99");
 
             verify(userMapper, never()).toResponse(any());
+            verifyNoInteractions(eventProducer);
         }
     }
 
@@ -141,6 +173,7 @@ class UserServiceImplTest {
             List<UserResponse> result = userService.findAll();
 
             assertThat(result).containsExactly(sampleResponse);
+            verifyNoInteractions(eventProducer);
         }
 
         @Test
@@ -150,6 +183,7 @@ class UserServiceImplTest {
 
             assertThat(userService.findAll()).isEmpty();
             verify(userMapper, never()).toResponse(any());
+            verifyNoInteractions(eventProducer);
         }
     }
 
@@ -160,8 +194,8 @@ class UserServiceImplTest {
     class Update {
 
         @Test
-        @DisplayName("валидные данные -> обновляет и возвращает DTO")
-        void valid_updatesAndReturnsDto() {
+        @DisplayName("валидные данные -> обновляет и возвращает DTO, событие НЕ отправляется")
+        void valid_updatesAndReturnsDtoWithoutEvent() {
             UserUpdateRequest request = new UserUpdateRequest("Bob", "bob@mail.ru", 25);
 
             when(userRepository.findById(1L)).thenReturn(Optional.of(sampleUser));
@@ -175,11 +209,13 @@ class UserServiceImplTest {
             assertThat(result.name()).isEqualTo("Bob");
             assertThat(result.email()).isEqualTo("bob@mail.ru");
             assertThat(result.age()).isEqualTo(25);
+
             assertThat(sampleUser.getName()).isEqualTo("Bob");
             assertThat(sampleUser.getEmail()).isEqualTo("bob@mail.ru");
             assertThat(sampleUser.getAge()).isEqualTo(25);
 
             verify(userRepository).save(sampleUser);
+            verifyNoInteractions(eventProducer);
         }
 
         @Test
@@ -209,9 +245,9 @@ class UserServiceImplTest {
 
             userService.update(1L, request);
 
-            assertThat(sampleUser.getName()).isEqualTo("Alice");      // не менялось
-            assertThat(sampleUser.getEmail()).isEqualTo("new@mail.ru"); // изменилось
-            assertThat(sampleUser.getAge()).isEqualTo(30);              // не менялось
+            assertThat(sampleUser.getName()).isEqualTo("Alice");
+            assertThat(sampleUser.getEmail()).isEqualTo("new@mail.ru");
+            assertThat(sampleUser.getAge()).isEqualTo(30);
         }
 
         @Test
@@ -225,6 +261,7 @@ class UserServiceImplTest {
                     .isInstanceOf(UserNotFoundException.class);
 
             verify(userRepository, never()).save(any());
+            verifyNoInteractions(eventProducer);
         }
     }
 
@@ -235,25 +272,31 @@ class UserServiceImplTest {
     class DeleteById {
 
         @Test
-        @DisplayName("существующий -> удаляет")
-        void existing_deletes() {
-            when(userRepository.existsById(1L)).thenReturn(true);
+        @DisplayName("существующий -> удаляет и отправляет DELETED-событие с email")
+        void existing_deletesAndSendsEvent() {
+            when(userRepository.findById(1L)).thenReturn(Optional.of(sampleUser));
 
             userService.deleteById(1L);
 
-            verify(userRepository).existsById(1L);
             verify(userRepository).deleteById(1L);
+
+            ArgumentCaptor<UserEvent> eventCaptor = ArgumentCaptor.forClass(UserEvent.class);
+            verify(eventProducer).send(eventCaptor.capture());
+            UserEvent sentEvent = eventCaptor.getValue();
+            assertThat(sentEvent.operation()).isEqualTo(UserOperation.DELETED);
+            assertThat(sentEvent.email()).isEqualTo("alice@mail.ru");
         }
 
         @Test
-        @DisplayName("несуществующий -> UserNotFoundException, deleteById не вызывается")
-        void missing_throws() {
-            when(userRepository.existsById(99L)).thenReturn(false);
+        @DisplayName("несуществующий -> UserNotFoundException, deleteById и событие НЕ вызываются")
+        void missing_throwsAndDoesNotSendEvent() {
+            when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> userService.deleteById(99L))
                     .isInstanceOf(UserNotFoundException.class);
 
             verify(userRepository, never()).deleteById(any());
+            verify(eventProducer, never()).send(any());
         }
     }
 }
