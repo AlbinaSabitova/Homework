@@ -35,28 +35,34 @@ class UserControllerTest {
     // -------- GET /api/users --------
 
     @Test
-    @DisplayName("GET /api/users -> 200 + список")
+    @DisplayName("GET /api/users -> 200 + список + HATEOAS self")
     void findAll_returnsList() throws Exception {
         when(userService.findAll()).thenReturn(List.of(sample));
 
         mockMvc.perform(get("/api/users"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(1))
-                .andExpect(jsonPath("$[0].name").value("Alice"))
-                .andExpect(jsonPath("$[0].email").value("alice@mail.ru"));
+                .andExpect(jsonPath("$._embedded.userResponseList[0].id").value(1))
+                .andExpect(jsonPath("$._embedded.userResponseList[0].name").value("Alice"))
+                .andExpect(jsonPath("$._embedded.userResponseList[0].email").value("alice@mail.ru"))
+                .andExpect(jsonPath("$._embedded.userResponseList[0]._links.self.href").exists())
+                .andExpect(jsonPath("$._links.self.href").exists());
     }
 
     // -------- GET /api/users/{id} --------
 
     @Test
-    @DisplayName("GET /api/users/{id} -> 200 + пользователь")
-    void findById_returnsUser() throws Exception {
+    @DisplayName("GET /api/users/{id} -> 200 + пользователь + HATEOAS-ссылки")
+    void findById_returnsUserWithLinks() throws Exception {
         when(userService.findById(1L)).thenReturn(sample);
 
         mockMvc.perform(get("/api/users/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1))
-                .andExpect(jsonPath("$.email").value("alice@mail.ru"));
+                .andExpect(jsonPath("$.email").value("alice@mail.ru"))
+                .andExpect(jsonPath("$._links.self.href").exists())
+                .andExpect(jsonPath("$._links.users.href").exists())
+                .andExpect(jsonPath("$._links.update.href").exists())
+                .andExpect(jsonPath("$._links.delete.href").exists());
     }
 
     @Test
@@ -72,7 +78,7 @@ class UserControllerTest {
     // -------- POST /api/users --------
 
     @Test
-    @DisplayName("POST /api/users -> 201 + Location")
+    @DisplayName("POST /api/users -> 201 + Location + HATEOAS")
     void create_returns201() throws Exception {
         when(userService.create(any())).thenReturn(sample);
 
@@ -85,7 +91,8 @@ class UserControllerTest {
                         .content(body))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", "/api/users/1"))
-                .andExpect(jsonPath("$.id").value(1));
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$._links.self.href").exists());
     }
 
     @Test
@@ -121,7 +128,7 @@ class UserControllerTest {
     // -------- PUT /api/users/{id} --------
 
     @Test
-    @DisplayName("PUT /api/users/{id} -> 200")
+    @DisplayName("PUT /api/users/{id} -> 200 + HATEOAS")
     void update_returns200() throws Exception {
         when(userService.update(eq(1L), any())).thenReturn(sample);
 
@@ -133,7 +140,8 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(1));
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$._links.self.href").exists());
     }
 
     // -------- DELETE /api/users/{id} --------
