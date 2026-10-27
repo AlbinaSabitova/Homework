@@ -1,0 +1,22 @@
+server:
+  port: 8761
+
+spring:
+  application:
+    name: eureka-server
+
+eureka:
+  client:
+    register-with-eureka: false     # сервер не регистрируется сам в себе
+    fetch-registry: false           # сервер не загружает реестр
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  server:
+    enable-self-preservation: false # отключить self-preservation (для dev)
+    eviction-interval-timer-in-ms: 5000  # как часто проверять «мёртвые» инстансы
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
