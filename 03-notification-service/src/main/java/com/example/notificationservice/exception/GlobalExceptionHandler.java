@@ -10,6 +10,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -26,7 +27,6 @@ public class GlobalExceptionHandler {
         for (FieldError error : ex.getBindingResult().getFieldErrors()) {
             fieldErrors.put(error.getField(), error.getDefaultMessage());
         }
-
         return ResponseEntity.badRequest().body(Map.of(
                 "timestamp", LocalDateTime.now(),
                 "status", 400,
@@ -40,9 +40,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleConstraintViolation(ConstraintViolationException ex) {
         Map<String, String> fieldErrors = new HashMap<>();
         ex.getConstraintViolations().forEach(v ->
-                fieldErrors.put(v.getPropertyPath().toString(), v.getMessage())
-        );
-
+                fieldErrors.put(v.getPropertyPath().toString(), v.getMessage()));
         return ResponseEntity.badRequest().body(Map.of(
                 "timestamp", LocalDateTime.now(),
                 "status", 400,
@@ -70,6 +68,17 @@ public class GlobalExceptionHandler {
                 "status", 400,
                 "error", "Bad Request",
                 "message", "Некорректный JSON или типы полей"
+        ));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNoResource(NoResourceFoundException ex) {
+        log.debug("Ресурс не найден: {}", ex.getResourcePath());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                "timestamp", LocalDateTime.now(),
+                "status", 404,
+                "error", "Not Found",
+                "message", "Ресурс не найден: " + ex.getResourcePath()
         ));
     }
 
