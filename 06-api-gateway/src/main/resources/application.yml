@@ -15,10 +15,20 @@ spring:
           uri: lb://user-service
           predicates:
             - Path=/api/users/**,/v3/api-docs/**,/swagger-ui/**,/swagger-ui.html
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userServiceCircuitBreaker
+                fallbackUri: forward:/fallback/user-service
         - id: notification-service
           uri: lb://notification-service
           predicates:
             - Path=/api/notifications/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: notificationServiceCircuitBreaker
+                fallbackUri: forward:/fallback/notification-service
 
 eureka:
   client:
@@ -31,8 +41,28 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,gateway
+        include: health,info,gateway,circuitbreakers
 
   endpoint:
      gateway:
         enabled: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      userServiceCircuitBreaker:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+      notificationServiceCircuitBreaker:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+  timelimiter:
+    instances:
+      userServiceCircuitBreaker:
+        timeoutDuration: 5s
+      notificationServiceCircuitBreaker:
+        timeoutDuration: 5s
