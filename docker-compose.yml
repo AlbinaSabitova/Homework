@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: homework-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: userdb
       POSTGRES_USER: user
@@ -19,6 +20,7 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
     container_name: homework-zookeeper
+    restart: unless-stopped
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -28,6 +30,7 @@ services:
   kafka:
     image: confluentinc/cp-kafka:7.6.1
     container_name: homework-kafka
+    restart: unless-stopped
     depends_on:
       - zookeeper
     ports:
@@ -46,9 +49,81 @@ services:
   mailhog:
     image: mailhog/mailhog:latest
     container_name: homework-mailhog
+    restart: unless-stopped
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI
+      - "1025:1025"
+      - "8025:8025"
+
+  config-server:
+    build: ./04-config-server
+    container_name: homework-config-server
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8888/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  eureka-server:
+    build: ./05-eureka-server
+    container_name: homework-eureka-server
+    restart: unless-stopped
+    ports:
+      - "8761:8761"
+    depends_on:
+      config-server:
+        condition: service_healthy
+
+  user-service:
+    build: ./02-user-service
+    container_name: homework-user-service
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+  notification-service:
+    build: ./03-notification-service
+    container_name: homework-notification-service
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+      kafka:
+        condition: service_started
+      mailhog:
+        condition: service_started
+
+  api-gateway:
+    build: ./06-api-gateway
+    container_name: homework-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+      user-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
 
 volumes:
   pgdata:

@@ -2,8 +2,6 @@ server:
   port: 8080
 
 spring:
-  application:
-    name: api-gateway
   cloud:
     gateway:
       discovery:
@@ -33,6 +31,14 @@ spring:
                 name: notificationServiceCircuitBreaker
                 fallbackUri: forward:/fallback/notification-service
 
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka/
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+
 management:
   endpoints:
     web:
@@ -59,7 +65,7 @@ resilience4j:
         permittedNumberOfCallsInHalfOpenState: 3
   timelimiter:
     instances:
-       userServiceCircuitBreaker:
-          timeoutDuration: 5s
-       notificationServiceCircuitBreaker:
-          timeoutDuration: 5s
+      userServiceCircuitBreaker:
+        timeoutDuration: 5s
+      notificationServiceCircuitBreaker:
+        timeoutDuration: 5s
